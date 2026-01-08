@@ -126,13 +126,13 @@ func handle(err error) {
 	switch mErr.Code() {
 	case ErrCodeOverheat:
         // Sound the alarms
-	case CodeNotFound:
+	case mishap.CodeNotFound:
 		// return 404
-	case CodeBadRequest, CodeValidation:
+	case mishap.CodeBadRequest, mishap.CodeValidation:
 		// return 400
-	case CodeUnauthorized:
+	case mishap.CodeUnauthorized:
 		// return 401
-	case CodeForbidden:
+	case mishap.CodeForbidden:
 		// return 403
 	default:
 		// return 500 / log as error
