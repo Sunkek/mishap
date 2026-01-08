@@ -85,7 +85,7 @@ err = mishap.Wrap( // Force ErrCodeCriticalFailure instead of code inheritance
 
 ### Handle
 
-A `mishap.Err` carries a `Code` that you can match with `errors.Is`.
+A `mishap.Err` carries a `Code` that you can match with `errors.Is`. You can lookup the whole error chain:
 
 ```go
 func handle(err error) {
@@ -103,6 +103,36 @@ func handle(err error) {
 	case errors.Is(err, mishap.CodeUnauthorized):
 		// return 401
 	case errors.Is(err, mishap.CodeForbidden):
+		// return 403
+	default:
+		// return 500 / log as error
+	}
+}
+```
+
+Or check only the topmost error code:
+
+```go
+func handle(err error) {
+	if err == nil {
+		return
+	}
+
+    mErr, ok := err.(*mishap.Err)
+    if !ok {
+        // return 500 / log as error
+    }
+
+	switch mErr.Code() {
+	case ErrCodeOverheat:
+        // Sound the alarms
+	case CodeNotFound:
+		// return 404
+	case CodeBadRequest, CodeValidation:
+		// return 400
+	case CodeUnauthorized:
+		// return 401
+	case CodeForbidden:
 		// return 403
 	default:
 		// return 500 / log as error
