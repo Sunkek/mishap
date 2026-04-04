@@ -1,153 +1,203 @@
-# Mishap
+# mishap
 
-This package generalizes my error handling approach.
+[![CI](https://github.com/sunkek/mishap/actions/workflows/ci.yml/badge.svg)](https://github.com/sunkek/mishap/actions/workflows/ci.yml)
+[![Go Reference](https://pkg.go.dev/badge/github.com/sunkek/mishap.svg)](https://pkg.go.dev/github.com/sunkek/mishap)
+[![Go Report Card](https://goreportcard.com/badge/github.com/sunkek/mishap)](https://goreportcard.com/report/github.com/sunkek/mishap)
 
-## Install
+A small, explicit error handling package for Go — zero external dependencies.
 
-Add it to your project with:
+`mishap` gives every error a typed code so you can route, match, and log errors
+without parsing strings. It wraps any `error` value, inherits codes through the
+chain, and integrates cleanly with the standard `errors` package.
 
-```sh
+```
 go get github.com/sunkek/mishap
 ```
 
-## Usage
+---
 
-### Create
+## Core concept
 
-* Create a custom code
+Every error carries a **Code** — a typed string you can match with `errors.Is`:
 
-You can use the default error codes (`mishap.Code...`) or create your own codes.
+```go
+var ErrCodeOverheat = mishap.Code("OVERHEAT")
+
+err := mishap.New("temperature over 9000°C", ErrCodeOverheat)
+
+if errors.Is(err, ErrCodeOverheat) {
+    // sound the alarms
+}
+```
+
+Codes survive wrapping, including through `fmt.Errorf("%w", ...)`:
+
+```go
+inner := mishap.New("row not found", mishap.CodeNotFound)
+outer := mishap.Wrap(inner, "load user") // inherits CodeNotFound
+
+fmt.Println(outer.Code())  // NOT_FOUND
+fmt.Println(outer.Error()) // load user: row not found
+```
+
+---
+
+## Creating errors
+
+```go
+// New requires a non-empty message and code — panics otherwise.
+err := mishap.New("user not found", mishap.CodeNotFound)
+```
+
+Use the built-in codes for common HTTP/gRPC scenarios, or define your own:
 
 ```go
 var ErrCodeOverheat = mishap.Code("OVERHEAT")
 ```
 
-* Create a root error
+---
 
-You can create new errors easily, wherever you need them or in your common errors package to be imported across your project.
+## Wrapping errors
 
-```go
-err := mishap.New("temperature over 9000C", ErrCodeOverheat)
-```
+`Wrap` creates a new `*Err` around any existing error. Code resolution follows
+this precedence:
 
-### Wrap
-
-Wrap any error with a `mishap` error. Code precedence when wrapping: 
-1. `WithCode`
-2. Inherited code from the first `*mishap.Err` in chain
-3. `WithDefaultCode`
+1. `WithCode` — explicit override
+2. The code of the first `*Err` found anywhere in the cause chain
+3. `WithDefaultCode` — caller-supplied fallback
 4. `CodeInternal`
 
-
 ```go
-err := errors.New("forge overheat") // No `mishap.Err` in chain
-err = mishap.Wrap(err, "critical failure") // Code defaults to `mishap.CodeInternal`
+// Inherit code from the cause chain (most common case)
+outer := mishap.Wrap(inner, "load user")
+
+// Force a specific code, ignoring the chain
+outer := mishap.Wrap(inner, "load user", mishap.WithCode(mishap.CodeInternal))
+
+// Provide a fallback only when the chain has no code
+outer := mishap.Wrap(err, "load user", mishap.WithDefaultCode(mishap.CodeBadRequest))
 ```
 
-```go
-err := errors.New("forge overheat") // No `mishap.Err` in chain
-var ErrCodeCriticalFailure = mishap.Code("CRITICAL_FAILURE") // Use a custom code if you want
-err = mishap.Wrap( // Code defaults to the provided ErrCodeCriticalFailure
-    err, 
-    "critical failure", 
-    mishap.WithDefaultCode(ErrCodeCriticalFailure),
-)
-```
+`Wrap` returns `nil` when `err` is `nil` — safe to use in one-liners:
 
 ```go
-var ErrCodeOverheat = mishap.Code("OVERHEAT") // Use a custom code if you want
-err := mishap.New("forge overheat", ErrCodeOverheat) // Create a new `mishap.Err`
-var ErrCodeCriticalFailure = mishap.Code("CRITICAL_FAILURE") // Use a custom code if you want
-err = mishap.Wrap( // Results with `ErrCodeOverheat`. Inheritance takes precedence over `mishap.WithDefaultCode` 
-    err, 
-    "critical failure",
-    mishap.WithDefaultCode(ErrCodeCriticalFailure),
-)
+return mishap.Wrap(repo.Find(id), "find user")
 ```
 
-```go
-var ErrCodeOverheat = mishap.Code("OVERHEAT") // Use a custom code if you want
-err := mishap.New("forge overheat", ErrCodeOverheat) // Create a new `mishap.Err`
-err = mishap.Wrap(err, "critical failure") // Inherits the ErrCodeOverheat from the previous err
-```
+---
 
-```go
-var ErrCodeOverheat = mishap.Code("OVERHEAT") // Use a custom code if you want
-err := mishap.New("forge overheat", ErrCodeOverheat) // Create a new `mishap.Err`
+## Handling errors
 
-var ErrCodeCriticalFailure = mishap.Code("CRITICAL_FAILURE") // Use a custom code if you want
-err = mishap.Wrap( // Force ErrCodeCriticalFailure instead of code inheritance
-    err, 
-    "critical failure", 
-    mishap.WithCode(ErrCodeCriticalFailure),
-)
-```
-
-### Handle
-
-A `mishap.Err` carries a `Code` that you can match with `errors.Is`. You can lookup the whole error chain:
+Match against the full chain with `errors.Is`:
 
 ```go
 func handle(err error) {
-	if err == nil {
-		return
-	}
-
-	switch {
-	case errors.Is(err, ErrCodeOverheat):
-        // Sound the alarms
-	case errors.Is(err, mishap.CodeNotFound):
-		// return 404
-	case errors.Is(err, mishap.CodeBadRequest), errors.Is(err, mishap.CodeValidation):
-		// return 400
-	case errors.Is(err, mishap.CodeUnauthorized):
-		// return 401
-	case errors.Is(err, mishap.CodeForbidden):
-		// return 403
-	default:
-		// return 500 / log as error
-	}
-}
-```
-
-Or check only the topmost error code:
-
-```go
-func handle(err error) {
-	if err == nil {
-		return
-	}
-
-    mErr, ok := err.(*mishap.Err)
-    if !ok {
-        // return 500 / log as error
+    switch {
+    case errors.Is(err, ErrCodeOverheat):
+        // sound the alarms
+    case errors.Is(err, mishap.CodeNotFound):
+        // return 404
+    case errors.Is(err, mishap.CodeBadRequest),
+         errors.Is(err, mishap.CodeValidation):
+        // return 400
+    case errors.Is(err, mishap.CodeUnauthorized):
+        // return 401
+    case errors.Is(err, mishap.CodeForbidden):
+        // return 403
+    default:
+        // return 500
     }
-
-	switch mErr.Code() {
-	case ErrCodeOverheat:
-        // Sound the alarms
-	case mishap.CodeNotFound:
-		// return 404
-	case mishap.CodeBadRequest, mishap.CodeValidation:
-		// return 400
-	case mishap.CodeUnauthorized:
-		// return 401
-	case mishap.CodeForbidden:
-		// return 403
-	default:
-		// return 500 / log as error
-	}
 }
 ```
 
-### Log
-
-`mishap.Err.Error()` prints the full error chain:
+Or extract the topmost `*Err` directly with `mishap.As`:
 
 ```go
-var ErrCodeOverheat = mishap.Code("OVERHEAT")
-err := mishap.New("temperature is over 9000C", ErrCodeOverheat)
-var ErrCodeCriticalFailure = mishap.Code("CRITICAL_FAILURE")
-err = mishap.Wrap(err, "extreme danger", mishap.WithDefaultCode(ErrCodeCriticalFailure))
-fmt.Println(err.Code(), err.Error()) // OVERHEAT extreme danger: temperature is over 9000C
+if mErr, ok := mishap.As(err); ok {
+    switch mErr.Code() {
+    case mishap.CodeNotFound:
+        // return 404
+    // ...
+    }
+}
 ```
+
+`errors.Is` scans the whole chain. `mErr.Code()` returns only the topmost code.
+Choose based on whether you care about where in the chain the code appears.
+
+---
+
+## Built-in codes
+
+### Client errors (4xx)
+
+| Code | Value |
+|---|---|
+| `CodeBadRequest` | `BAD_REQUEST` |
+| `CodeValidation` | `VALIDATION_ERROR` |
+| `CodeUnauthorized` | `UNAUTHORIZED` |
+| `CodeForbidden` | `FORBIDDEN` |
+| `CodeNotFound` | `NOT_FOUND` |
+| `CodeConflict` | `CONFLICT` |
+| `CodeGone` | `GONE` |
+| `CodeMethodNotAllowed` | `METHOD_NOT_ALLOWED` |
+| `CodeRequestTimeout` | `REQUEST_TIMEOUT` |
+| `CodeRequestEntityTooLarge` | `REQUEST_ENTITY_TOO_LARGE` |
+| `CodeUnsupportedMediaType` | `UNSUPPORTED_MEDIA_TYPE` |
+| `CodeUnprocessableEntity` | `UNPROCESSABLE_ENTITY` |
+| `CodeTooManyRequests` | `TOO_MANY_REQUESTS` |
+
+### Server errors (5xx)
+
+| Code | Value |
+|---|---|
+| `CodeInternal` | `INTERNAL_ERROR` |
+| `CodeNotImplemented` | `NOT_IMPLEMENTED` |
+| `CodeServiceUnavailable` | `SERVICE_UNAVAILABLE` |
+| `CodeGatewayTimeout` | `GATEWAY_TIMEOUT` |
+
+### General / transport-layer
+
+| Code | Value |
+|---|---|
+| `CodeUnknown` | `UNKNOWN` |
+| `CodeCancelled` | `CANCELLED` |
+| `CodeDeadlineExceeded` | `DEADLINE_EXCEEDED` |
+| `CodeResourceExhausted` | `RESOURCE_EXHAUSTED` |
+| `CodeAborted` | `ABORTED` |
+| `CodeDataLoss` | `DATA_LOSS` |
+
+---
+
+## API reference
+
+```go
+// Create a new structured error. Panics if message or code is empty.
+func New(message string, code Code) *Err
+
+// Wrap any error with a message. Returns nil if err is nil.
+// Panics if message is empty.
+func Wrap(err error, message string, opts ...WrapOption) *Err
+
+// Extract the first *Err from the chain. Convenience wrapper over errors.As.
+func As(err error) (*Err, bool)
+
+// WrapOptions
+func WithCode(code Code) WrapOption        // force a code
+func WithDefaultCode(code Code) WrapOption // fallback code
+
+// *Err methods
+func (e *Err) Code() Code    // topmost code
+func (e *Err) Message() string // topmost message
+func (e *Err) Error() string   // full chain: "outer: inner: cause"
+func (e *Err) Unwrap() error   // cause, for errors.Is/As traversal
+```
+
+---
+
+## Notes on Code
+
+`Code` implements `error` so that `errors.Is(err, mishap.CodeNotFound)` works
+without sentinel variables. **Do not return a bare `Code` as an error from your
+own functions** — always use `New` or `Wrap`. Returning a `Code` directly would
+compile silently but lose the message and chain.
