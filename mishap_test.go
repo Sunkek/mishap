@@ -60,6 +60,21 @@ func TestWrap_NilErrReturnsNil(t *testing.T) {
 	}
 }
 
+// TestWrap_NilErrIsNilThroughErrorReturn guards the typed-nil trap: when Wrap
+// returned *Err, the documented one-liner below produced a non-nil error
+// interface holding a nil pointer, so a caller's err != nil check took the
+// failure branch on success. Asserting on Wrap's result directly does not
+// catch this — the comparison has to happen after the value has passed
+// through an error return.
+func TestWrap_NilErrIsNilThroughErrorReturn(t *testing.T) {
+	find := func() error { return nil }
+	load := func() error { return mishap.Wrap(find(), "load user") }
+
+	if err := load(); err != nil {
+		t.Fatalf("load() = %v (%T), want nil", err, err)
+	}
+}
+
 func TestWrap_PanicsOnEmptyMessage(t *testing.T) {
 	defer func() {
 		if r := recover(); r == nil {
@@ -71,7 +86,7 @@ func TestWrap_PanicsOnEmptyMessage(t *testing.T) {
 
 func TestWrap_InheritsCode_FromInnerErr(t *testing.T) {
 	inner := mishap.New("row not found", mishap.CodeNotFound)
-	outer := mishap.Wrap(inner, "load user")
+	outer := mustAs(t, mishap.Wrap(inner, "load user"))
 	if outer.Code() != mishap.CodeNotFound {
 		t.Fatalf("outer.Code = %q, want %q", outer.Code(), mishap.CodeNotFound)
 	}
@@ -80,7 +95,7 @@ func TestWrap_InheritsCode_FromInnerErr(t *testing.T) {
 func TestWrap_InheritsCode_ThroughFmtWrapped(t *testing.T) {
 	inner := mishap.New("row not found", mishap.CodeNotFound)
 	wrapped := fmt.Errorf("db: %w", inner)
-	outer := mishap.Wrap(wrapped, "load user")
+	outer := mustAs(t, mishap.Wrap(wrapped, "load user"))
 	if outer.Code() != mishap.CodeNotFound {
 		t.Fatalf("outer.Code = %q, want %q", outer.Code(), mishap.CodeNotFound)
 	}
@@ -88,7 +103,7 @@ func TestWrap_InheritsCode_ThroughFmtWrapped(t *testing.T) {
 
 func TestWrap_WithCodeOverridesInheritance(t *testing.T) {
 	inner := mishap.New("row not found", mishap.CodeNotFound)
-	outer := mishap.Wrap(inner, "load user", mishap.WithCode(mishap.CodeInternal))
+	outer := mustAs(t, mishap.Wrap(inner, "load user", mishap.WithCode(mishap.CodeInternal)))
 	if outer.Code() != mishap.CodeInternal {
 		t.Fatalf("outer.Code = %q, want %q", outer.Code(), mishap.CodeInternal)
 	}
@@ -96,7 +111,7 @@ func TestWrap_WithCodeOverridesInheritance(t *testing.T) {
 
 func TestWrap_DefaultCodeUsedWhenNoInheritableCode(t *testing.T) {
 	inner := errors.New("boom")
-	outer := mishap.Wrap(inner, "failed", mishap.WithDefaultCode(mishap.CodeBadRequest))
+	outer := mustAs(t, mishap.Wrap(inner, "failed", mishap.WithDefaultCode(mishap.CodeBadRequest)))
 	if outer.Code() != mishap.CodeBadRequest {
 		t.Fatalf("outer.Code = %q, want %q", outer.Code(), mishap.CodeBadRequest)
 	}
@@ -104,14 +119,14 @@ func TestWrap_DefaultCodeUsedWhenNoInheritableCode(t *testing.T) {
 
 func TestWrap_DefaultCodeIgnoredWhenInheritableCodeExists(t *testing.T) {
 	inner := mishap.New("row not found", mishap.CodeNotFound)
-	outer := mishap.Wrap(inner, "load user", mishap.WithDefaultCode(mishap.CodeBadRequest))
+	outer := mustAs(t, mishap.Wrap(inner, "load user", mishap.WithDefaultCode(mishap.CodeBadRequest)))
 	if outer.Code() != mishap.CodeNotFound {
 		t.Fatalf("outer.Code = %q, want %q", outer.Code(), mishap.CodeNotFound)
 	}
 }
 
 func TestWrap_FallsBackToCodeInternalByDefault(t *testing.T) {
-	outer := mishap.Wrap(errors.New("raw"), "oh no")
+	outer := mustAs(t, mishap.Wrap(errors.New("raw"), "oh no"))
 	if outer.Code() != mishap.CodeInternal {
 		t.Fatalf("outer.Code = %q, want %q", outer.Code(), mishap.CodeInternal)
 	}
@@ -139,7 +154,7 @@ func TestIs_ErrTarget_MatchesByCodeOnly(t *testing.T) {
 
 func TestIs_ScansChain(t *testing.T) {
 	inner := mishap.New("row not found", mishap.CodeNotFound)
-	outer := mishap.Wrap(inner, "load user", mishap.WithCode(mishap.CodeInternal))
+	outer := mustAs(t, mishap.Wrap(inner, "load user", mishap.WithCode(mishap.CodeInternal)))
 
 	// topmost code is INTERNAL
 	if outer.Is(mishap.CodeNotFound) {
@@ -178,4 +193,16 @@ func TestAs_ReturnsFalseForNil(t *testing.T) {
 	if ok {
 		t.Fatal("As() returned true for nil, want false")
 	}
+}
+
+// mustAs extracts the *Err from err, failing the test if there is none. These
+// tests assert on the topmost code and on Is, both of which need the concrete
+// type; Wrap returns error, so As is the documented way back to it.
+func mustAs(t *testing.T, err error) *mishap.Err {
+	t.Helper()
+	e, ok := mishap.As(err)
+	if !ok {
+		t.Fatalf("As(%v) = false, want an *Err", err)
+	}
+	return e
 }

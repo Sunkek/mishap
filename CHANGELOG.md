@@ -7,7 +7,40 @@ mishap uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
-## [Unreleased](https://github.com/sunkek/mishap/compare/v1.1.0...HEAD)
+## [Unreleased](https://github.com/sunkek/mishap/compare/v1.2.0...HEAD)
+
+---
+
+## [1.2.0](https://github.com/sunkek/mishap/compare/v1.1.0...v1.2.0) — 2026-09-03
+
+### Changed
+
+* **Breaking:** `Wrap` now returns `error` instead of `*Err`. Returning the
+  concrete pointer meant the documented one-liner
+  `return mishap.Wrap(repo.Find(id), "find user")` produced a **non-nil**
+  `error` interface holding a nil `*Err` whenever the wrapped error was nil, so
+  the caller's `err != nil` check took the failure branch on success — Go's
+  typed-nil trap. `Wrap(nil, ...)` now yields a genuinely nil `error`.
+
+  Call sites that pass the result straight to an `error` return or variable
+  need no change. Code that chained a method on the result
+  (`mishap.Wrap(err, "x").Code()`) must go through `mishap.As` instead:
+
+  ```go
+  if mErr, ok := mishap.As(mishap.Wrap(err, "x")); ok {
+      _ = mErr.Code()
+  }
+  ```
+
+  `New` is unaffected and still returns `*Err` — it never returns nil, so the
+  trap does not apply to it.
+
+### Fixed
+
+* `TestWrap_NilErrReturnsNil` compared `Wrap`'s result as a concrete `*Err`, a
+  pointer comparison that could never observe the typed-nil bug above. The
+  regression test now asserts nil-ness after the value has passed through an
+  `error` return.
 
 ---
 

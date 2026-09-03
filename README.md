@@ -59,7 +59,7 @@ var ErrCodeOverheat = mishap.Code("OVERHEAT")
 
 ## Wrapping errors
 
-`Wrap` creates a new `*Err` around any existing error. Code resolution follows
+`Wrap` wraps any existing error, returning an `error`. Code resolution follows
 this precedence:
 
 1. `WithCode` — explicit override
@@ -78,10 +78,22 @@ outer := mishap.Wrap(inner, "load user", mishap.WithCode(mishap.CodeInternal))
 outer := mishap.Wrap(err, "load user", mishap.WithDefaultCode(mishap.CodeBadRequest))
 ```
 
-`Wrap` returns `nil` when `err` is `nil` — safe to use in one-liners:
+`Wrap` returns a nil `error` when `err` is `nil` — safe to use in one-liners:
 
 ```go
 return mishap.Wrap(repo.Find(id), "find user")
+```
+
+This is why `Wrap` returns `error` rather than `*Err`. A concrete pointer
+return would make the line above produce a non-nil `error` interface holding a
+nil `*Err`, so the caller's `err != nil` check would take the failure branch on
+success — Go's typed-nil trap. Reach the `*Err` with `mishap.As` when you need
+its `Code()` or `Message()`:
+
+```go
+if mErr, ok := mishap.As(mishap.Wrap(err, "load user")); ok {
+    log.Println(mErr.Code())
+}
 ```
 
 ---
@@ -175,9 +187,10 @@ Choose based on whether you care about where in the chain the code appears.
 // Create a new structured error. Panics if message or code is empty.
 func New(message string, code Code) *Err
 
-// Wrap any error with a message. Returns nil if err is nil.
-// Panics if message is empty.
-func Wrap(err error, message string, opts ...WrapOption) *Err
+// Wrap any error with a message. Returns a nil error if err is nil.
+// Panics if message is empty. Returns error, not *Err, so the nil case
+// survives assignment — use As to reach the *Err.
+func Wrap(err error, message string, opts ...WrapOption) error
 
 // Extract the first *Err from the chain. Convenience wrapper over errors.As.
 func As(err error) (*Err, bool)

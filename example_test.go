@@ -20,7 +20,9 @@ func ExampleWrap_inheritCodeFromInnerMishap() {
 	inner := mishap.New("row not found", mishap.CodeNotFound)
 	outer := mishap.Wrap(inner, "load user")
 	fmt.Println(outer.Error())
-	fmt.Println(outer.Code())
+	// Wrap returns error; As reaches the *Err for its topmost code.
+	wrapped, _ := mishap.As(outer)
+	fmt.Println(wrapped.Code())
 	// Output:
 	// load user: row not found
 	// NOT_FOUND
@@ -29,7 +31,7 @@ func ExampleWrap_inheritCodeFromInnerMishap() {
 func ExampleWrap_inheritThroughNonMishapWrapper() {
 	inner := mishap.New("row not found", mishap.CodeNotFound)
 	wrapped := fmt.Errorf("db: %w", inner)
-	outer := mishap.Wrap(wrapped, "load user")
+	outer, _ := mishap.As(mishap.Wrap(wrapped, "load user"))
 	fmt.Println(outer.Code())
 	// Output:
 	// NOT_FOUND
@@ -37,7 +39,7 @@ func ExampleWrap_inheritThroughNonMishapWrapper() {
 
 func ExampleWrap_withCodeOverridesInheritance() {
 	inner := mishap.New("row not found", mishap.CodeNotFound)
-	outer := mishap.Wrap(inner, "load user", mishap.WithCode(mishap.CodeInternal))
+	outer, _ := mishap.As(mishap.Wrap(inner, "load user", mishap.WithCode(mishap.CodeInternal)))
 	fmt.Println(outer.Code())
 	// Output:
 	// INTERNAL_ERROR
@@ -45,7 +47,7 @@ func ExampleWrap_withCodeOverridesInheritance() {
 
 func ExampleWrap_defaultCodeUsedWhenNoInnerCode() {
 	inner := errors.New("boom")
-	outer := mishap.Wrap(inner, "failed", mishap.WithDefaultCode(mishap.CodeBadRequest))
+	outer, _ := mishap.As(mishap.Wrap(inner, "failed", mishap.WithDefaultCode(mishap.CodeBadRequest)))
 	fmt.Println(outer.Code())
 	// Output:
 	// BAD_REQUEST

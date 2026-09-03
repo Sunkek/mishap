@@ -98,15 +98,24 @@ func WithDefaultCode(code Code) WrapOption {
 	return func(c *wrapConfig) { c.defaultCode = code }
 }
 
-// Wrap creates an *[Err] around err with the given message.
-// It returns nil when err is nil.
+// Wrap creates an *[Err] around err with the given message, returned as an
+// [error]. It returns a nil error when err is nil.
+//
+// The return type is [error], not *[Err], so that the nil case survives the
+// assignment. A function returning *[Err] would produce a non-nil error
+// interface holding a nil pointer, and the caller's err != nil check would
+// take the failure branch on success:
+//
+//	return mishap.Wrap(repo.Find(id), "find user") // nil in, nil out
+//
+// Use [As] when you need the *[Err] itself.
 //
 // Code resolution order:
 //  1. [WithCode] — explicit override
 //  2. The code of the first *[Err] found anywhere in the cause chain
 //  3. [WithDefaultCode] — caller-supplied fallback
 //  4. [CodeInternal]
-func Wrap(err error, message string, opts ...WrapOption) *Err {
+func Wrap(err error, message string, opts ...WrapOption) error {
 	if err == nil {
 		return nil
 	}
